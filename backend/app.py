@@ -4,13 +4,28 @@ from flask import Flask, Response, jsonify, render_template
 import numpy as np # Import numpy for image processing
 import random # For simulating random events
 
+# Import dlib for face detection and landmark prediction
+import dlib
+from scipy.spatial import distance as dist # For calculating Euclidean distance for EAR/MAR
+
 app = Flask(__name__)
 
 # --- Configuration ---
 # Use 0 for default webcam, or a video file path
 VIDEO_SOURCE = 0
 # Interval for updating analytics (in seconds)
-ANALYTICS_UPDATE_INTERVAL = 2 # Reduced for faster UI updates
+ANALYTICS_UPDATE_INTERVAL = 1 # Faster UI updates
+
+# --- AI Detection Thresholds (Using real landmark data) ---
+EYE_AR_THRESH = 0.25 # Threshold for eye aspect ratio (drowsiness)
+EYE_AR_CONSEC_FRAMES = 10 # Number of consecutive frames eye must be below threshold
+MOUTH_AR_THRESH = 0.7 # Threshold for mouth aspect ratio (yawning)
+MOUTH_AR_CONSEC_FRAMES = 10 # Number of consecutive frames mouth must be above threshold
+# Head pose thresholds (in arbitrary units/degrees for simplified estimation)
+HEAD_POSE_YAW_THRESH = 15 # Horizontal head rotation deviation threshold
+HEAD_POSE_PITCH_THRESH = 15 # Vertical head rotation deviation threshold
+GAZE_AWAY_CONSEC_FRAMES = 30 # Number of consecutive frames gaze/head pose is away
+ABSENCE_TIME_THRESHOLD = 5 # Seconds of no face to trigger absent status
 
 # --- Global Variables for Analytics ---
 global_face_count = 0
@@ -20,25 +35,48 @@ global_unauthorized_activity_status = "None Detected"
 global_copy_attempt_status = "None Detected"
 global_proctoring_alert_status = "No Violations"
 
-# --- AI Simulation/Detection Variables ---
+# --- AI Detection State Variables ---
+# For Drowsiness/Yawn Detection
+COUNTER = 0 # Frame counter for eye aspect ratio below threshold
+YAWN_COUNTER = 0 # Frame counter for mouth aspect ratio above threshold
+# For Gaze/Head Pose Detection
+HEAD_POSE_AWAY_COUNTER = 0 # Frame counter for head pose deviation
+
+# Timestamp of the last person detected
 last_person_detected_time = time.time()
-simulated_drowsiness_level = 0 # 0-100, higher means more drowsy
-last_gaze_direction = "center" # Simulated: "center", "left", "right", "up", "down"
-gaze_away_duration = 0
-max_gaze_away_duration = 3 # seconds before unauthorized activity
 
-# Timestamp of the last analytics update
-last_analytics_update_time = time.time()
-last_activity_check_time = time.time() # Used for overall simulated events
-
-
+# --- Initialize dlib's face detector (HOG-based) and facial landmark predictor ---
+detector = dlib.get_frontal_face_detector()
+# You MUST download shape_predictor_68_face_landmarks.dat and place it in the 'backend' directory.
+# Download from: http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
 try:
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    if face_cascade.empty():
-        print("Error: Could not load face cascade XML file. Please ensure it's in the same directory as app.py.")
+    predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+    print("dlib face detector and shape predictor initialized successfully.")
 except Exception as e:
-    print(f"Error loading face cascade: {e}")
-    face_cascade = None 
+    print(f"Error loading dlib shape predictor: {e}")
+    print("CRITICAL: Please download 'shape_predictor_68_face_landmarks.dat' from http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2, extract it, and place it in the same directory as app.py.")
+    predictor = None # Set to None to handle errors gracefully
+
+# --- Helper functions for Eye and Mouth Aspect Ratios ---
+def eye_aspect_ratio(eye):
+    # Compute the Euclidean distances between the two sets of vertical eye landmarks
+    A = dist.euclidean(eye[1], eye[5])
+    B = dist.euclidean(eye[2], eye[4])
+    # Compute the Euclidean distance between the horizontal eye landmark
+    C = dist.euclidean(eye[0], eye[3])
+    # Compute the eye aspect ratio
+    ear = (A + B) / (2.0 * C)
+    return ear
+
+def mouth_aspect_ratio(mouth):
+    # Compute the Euclidean distances between the two sets of vertical mouth landmarks (51, 59) and (53, 57)
+    A = dist.euclidean(mouth[2], mouth[10]) # Points 51 and 59
+    B = dist.euclidean(mouth[4], mouth[8])  # Points 53 and 57
+    # Compute the Euclidean distance between the horizontal mouth landmarks (48, 54)
+    C = dist.euclidean(mouth[0], mouth[6]) # Points 48 and 54
+    # Compute the mouth aspect ratio
+    mar = (A + B) / (2.0 * C)
+    return mar
 
 # --- Video Capture Initialization ---
 print(f"Attempting to open camera source: {VIDEO_SOURCE}")
@@ -49,91 +87,186 @@ if not camera.isOpened():
 else:
     print(f"Successfully opened video source {VIDEO_SOURCE}.")
 
-# --- AI Detection & Simulation Logic (Enhanced) ---
-def perform_ai_detection(frame, faces):
+# --- AI Detection Logic (Intelligent AI with dlib) ---
+def perform_ai_detection(frame):
     """
-    Performs basic AI-like detection based on face presence and simulated behaviors.
-    For a real system, advanced computer vision (e.g., dlib, mediapipe, deep learning models)
-    would be integrated here.
+    Performs AI-based detection for sleeping, focus, unauthorized activity,
+    and copy attempts using dlib facial landmarks.
     """
     global global_face_count, global_sleeping_status, global_focus_score, \
            global_unauthorized_activity_status, global_copy_attempt_status, \
            global_proctoring_alert_status, last_person_detected_time, \
-           simulated_drowsiness_level, last_gaze_direction, gaze_away_duration
+           COUNTER, YAWN_COUNTER, HEAD_POSE_AWAY_COUNTER
 
     current_time = time.time()
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # 1. Update Face Count
-    global_face_count = len(faces)
+    # Detect faces in the grayscale frame using dlib's HOG detector
+    rects = detector(gray_frame, 0) # 0 means no upsampling
+
+    global_face_count = len(rects)
 
     if global_face_count > 0:
         last_person_detected_time = current_time
-        # Reset activity flags if a person is clearly present and focused (simulated)
-        # These will be re-evaluated below
+        # Reset non-persistent statuses unless re-triggered in this frame
         global_unauthorized_activity_status = "None Detected"
         global_copy_attempt_status = "None Detected"
+        
+        # Reset proctoring alert if it was due to absence
+        if global_proctoring_alert_status == "Student Absent!":
+            global_proctoring_alert_status = "No Violations"
 
-        # --- Simulate Drowsiness (very basic) ---
-        # In a real app: Analyze eye-aspect ratio (EAR) over time
-        # Here: Simulate based on random chance or prolonged "stillness"
-        if random.random() < 0.01: # 1% chance per frame to change drowsiness
-            if simulated_drowsiness_level < 100 and random.random() < 0.6: # 60% chance to increase
-                simulated_drowsiness_level += random.randint(1, 5)
-            elif simulated_drowsiness_level > 0: # 40% chance to decrease
-                simulated_drowsiness_level -= random.randint(1, 5)
-            simulated_drowsiness_level = max(0, min(100, simulated_drowsiness_level)) # Keep within 0-100
-
-        if simulated_drowsiness_level > 70:
-            global_sleeping_status = "Likely Sleeping (AI Simulated)"
-            global_proctoring_alert_status = "Drowsiness Detected!"
-        elif simulated_drowsiness_level > 40:
-            global_sleeping_status = "Potentially Drowsy (AI Simulated)"
-            global_proctoring_alert_status = "Low Alertness"
-        else:
-            global_sleeping_status = "Awake (AI Simulated)"
-            global_proctoring_alert_status = "No Violations" # Default
-
-        # --- Simulate Gaze Direction / Attention (very basic) ---
-        # In a real app: Head pose estimation (e.g., from facial landmarks)
-        if random.random() < 0.02: # 2% chance to change gaze direction
-            possible_gazes = ["center", "left", "right", "up", "down"]
-            last_gaze_direction = random.choice(possible_gazes)
-
-        if last_gaze_direction != "center" and random.random() < 0.05: # 5% chance to accumulate gaze_away_duration
-            gaze_away_duration += 1
-        else:
-            gaze_away_duration = 0 # Reset if returns to center or not away
-
-        if gaze_away_duration > max_gaze_away_duration:
-            global_unauthorized_activity_status = f"Gaze Away for {gaze_away_duration}s (Simulated)"
-            global_proctoring_alert_status = "Attention Diverted!"
-        elif global_unauthorized_activity_status != "System Access Violation": # Don't overwrite higher priority alert
-             global_unauthorized_activity_status = "None Detected"
-
-
-        # --- Simulate Focus Score ---
-        # Combining face presence and inverse drowsiness
-        global_focus_score = max(0.0, 100.0 - simulated_drowsiness_level - (gaze_away_duration * 10))
-        global_focus_score = min(100.0, max(0.0, global_focus_score))
-
-
-        # --- Simulate Copy Attempt (Multi-person Detection) ---
-        # In a real app: More advanced social distancing or prohibited object detection
+        # Check for multiple people for copy attempt
         if global_face_count > 1:
             global_copy_attempt_status = f"Multiple Persons Detected ({global_face_count})!"
             global_proctoring_alert_status = "Potential Cheating!"
-        else:
-            global_copy_attempt_status = "None Detected"
+
+        # Process each detected face (or just the first for simplicity if multiple)
+        # In a multi-person scenario, you might want to process each person
+        # separately or identify the "primary" user. For simplicity, we process the first.
+        for i, rect in enumerate(rects):
+            if predictor is None: # Skip landmark detection if predictor failed to load
+                break
+
+            # Determine the facial landmarks for the face region
+            shape = predictor(gray_frame, rect)
+            landmarks = np.array([(p.x, p.y) for p in shape.parts()])
+
+            # Extract eye and mouth landmarks (indices from dlib's 68-point model)
+            left_eye_indices = [42, 43, 44, 45, 46, 47]
+            right_eye_indices = [36, 37, 38, 39, 40, 41]
+            mouth_indices = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67]
+
+            left_eye = landmarks[left_eye_indices]
+            right_eye = landmarks[right_eye_indices]
+            mouth = landmarks[mouth_indices]
+
+            # Calculate EAR for both eyes and average
+            leftEAR = eye_aspect_ratio(left_eye)
+            rightEAR = eye_aspect_ratio(right_eye)
+            ear = (leftEAR + rightEAR) / 2.0
+
+            # Calculate MAR for the mouth
+            mar = mouth_aspect_ratio(mouth)
+
+            # --- Drowsiness Detection (EAR) ---
+            if ear < EYE_AR_THRESH:
+                COUNTER += 1
+                if COUNTER >= EYE_AR_CONSEC_FRAMES:
+                    global_sleeping_status = "Likely Sleeping (Eyes Closed)"
+                    global_proctoring_alert_status = "Drowsiness Detected!"
+            else:
+                COUNTER = 0 # Reset counter when eyes are open
+                # Only set to awake if not already sleeping due to prolonged closure or yawn
+                if not ("Likely Sleeping" in global_sleeping_status or "Yawning" in global_sleeping_status):
+                    global_sleeping_status = "Awake"
+
+            # --- Yawn Detection (MAR) ---
+            if mar > MOUTH_AR_THRESH:
+                YAWN_COUNTER += 1
+                if YAWN_COUNTER >= MOUTH_AR_CONSEC_FRAMES:
+                    global_sleeping_status = "Yawning (AI Detected)"
+                    global_proctoring_alert_status = "Yawn Detected - Low Alertness"
+            else:
+                YAWN_COUNTER = 0 # Reset counter when mouth is closed
+                # Reset sleeping status if it was only due to yawning and eyes are open
+                if global_sleeping_status == "Yawning (AI Detected)" and ear >= EYE_AR_THRESH:
+                     global_sleeping_status = "Awake"
+            
+            # --- Head Pose Estimation (for Gaze/Looking Away) ---
+            # Using specific landmarks (nose, chin, eye corners) to infer rough 3D pose for gaze
+            # This is a simplified approach without a full 3D model, but better than pure random
+            # Points for 3D model (approximate)
+            # Source: https://www.pyimagesearch.com/2017/05/08/drowsiness-detection-opencv-python-dlib/
+            # and common dlib landmark assignments
+            image_points = np.array([
+                landmarks[30], # Nose tip
+                landmarks[8],  # Chin
+                landmarks[36], # Left eye left corner
+                landmarks[45], # Right eye right corner
+                landmarks[48], # Left mouth corner
+                landmarks[54]  # Right mouth corner
+            ], dtype="double")
+
+            # Dummy 3D model points (arbitrary values for a generic face)
+            # In a real application, you'd calibrate these or use a known generic face model.
+            model_points = np.array([
+                (0.0, 0.0, 0.0),             # Nose tip
+                (0.0, -330.0, -65.0),        # Chin
+                (-225.0, 170.0, -135.0),     # Left eye left corner
+                (225.0, 170.0, -135.0),      # Right eye right corner
+                (-150.0, -150.0, -125.0),    # Left mouth corner
+                (150.0, -150.0, -125.0)      # Right mouth corner
+            ])
+
+            # Camera internals (Approximations for a generic webcam)
+            focal_length = frame.shape[1] # Approximate focal length (image width)
+            center = (frame.shape[1]/2, frame.shape[0]/2)
+            camera_matrix = np.array([
+                                [focal_length, 0, center[0]],
+                                [0, focal_length, center[1]],
+                                [0, 0, 1]
+                            ], dtype = "double")
+
+            dist_coeffs = np.zeros((4,1)) # Assuming no lens distortion
+
+            # Solve for pose
+            (success, rotation_vector, translation_vector) = cv2.solvePnP(model_points, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+
+            # Get rotation matrix from rotation vector
+            rmat, _ = cv2.Rodrigues(rotation_vector)
+
+            # Get angles (Euler angles in degrees)
+            angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
+            
+            # Extract yaw and pitch (in degrees)
+            yaw = np.degrees(angles[1])
+            pitch = np.degrees(angles[0])
+
+            is_looking_away = False
+            if abs(yaw) > HEAD_POSE_YAW_THRESH or abs(pitch) > HEAD_POSE_PITCH_THRESH:
+                is_looking_away = True
+
+            if is_looking_away:
+                HEAD_POSE_AWAY_COUNTER += 1
+                if HEAD_POSE_AWAY_COUNTER >= GAZE_AWAY_CONSEC_FRAMES:
+                    global_unauthorized_activity_status = f"Looking Away (Yaw: {round(yaw,1)}deg, Pitch: {round(pitch,1)}deg)"
+                    global_proctoring_alert_status = "Attention Diverted!"
+            else:
+                HEAD_POSE_AWAY_COUNTER = 0
+                # Only clear if no other unauthorized activity (like multi-person or system violation)
+                if not (global_copy_attempt_status != "None Detected" or "System Access" in global_unauthorized_activity_status):
+                    global_unauthorized_activity_status = "None Detected"
+
+            # --- Update Focus Score (based on combined real factors) ---
+            # Focus is high if eyes are open, no yawning, and looking forward
+            # Normalize EAR/MAR to be between 0 and 1, then scale to 50
+            normalized_ear = min(1.0, ear / EYE_AR_THRESH) if EYE_AR_THRESH > 0 else 1.0
+            focus_from_eyes = normalized_ear * 50
+            
+            normalized_mar = min(1.0, mar / MOUTH_AR_THRESH) if MOUTH_AR_THRESH > 0 else 1.0
+            focus_from_mouth = (1.0 - normalized_mar) * 50 # Invert MAR as high MAR means less focus (yawn)
+            
+            # Penalty for looking away (scales up to 50 if beyond threshold)
+            gaze_penalty_factor = min(1.0, HEAD_POSE_AWAY_COUNTER / GAZE_AWAY_CONSEC_FRAMES)
+            gaze_penalty = gaze_penalty_factor * 50
+
+            global_focus_score = (focus_from_eyes + focus_from_mouth) - gaze_penalty
+            global_focus_score = min(100.0, max(0.0, global_focus_score)) # Cap between 0 and 100
 
 
-        # --- Draw Rectangles on Faces ---
-        for (x, y, w, h) in faces:
+            # --- Draw Rectangles and Landmarks ---
+            x, y, w, h = rect.left(), rect.top(), rect.width(), rect.height()
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            cv2.putText(frame, "Person", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+            cv2.putText(frame, f"Person {i+1}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+
+            # Draw landmarks for the first face (to avoid clutter if multiple faces)
+            for (lx, ly) in landmarks:
+                cv2.circle(frame, (lx, ly), 1, (0, 255, 0), -1)
 
     else: # No person detected
         time_since_last_person = current_time - last_person_detected_time
-        if time_since_last_person > 5: # If no person for 5+ seconds
+        if time_since_last_person > ABSENCE_TIME_THRESHOLD:
             global_sleeping_status = "No person detected - (Absent)"
             global_proctoring_alert_status = "Student Absent!"
             global_unauthorized_activity_status = "No Person Detected"
@@ -143,16 +276,20 @@ def perform_ai_detection(frame, faces):
 
         global_focus_score = 0.0
         global_copy_attempt_status = "None Detected"
-        # Keep proctoring alert if it was set for absence, otherwise reset to no violations
+        # Only clear if it was set for absence, not from a system violation from previous frames
         if global_proctoring_alert_status != "Student Absent!":
             global_proctoring_alert_status = "No Violations"
 
+        # Reset all AI state variables when no face is present
+        COUNTER = 0
+        YAWN_COUNTER = 0
+        HEAD_POSE_AWAY_COUNTER = 0
 
-    # --- Simulate Tab Switching / External Access (conceptual) ---
-    # This feature requires OS-level integration, not possible in pure browser/Flask.
-    # We continue a random simulation, but in a real app, this would be triggered
-    # by actual system events.
-    if random.random() < 0.0005: # Very low chance per frame
+
+    # --- Simulate Tab Switching / External Access (conceptual, still random) ---
+    # This feature still requires OS-level integration for true detection.
+    # It remains a random simulation for demonstration purposes in this web app.
+    if random.random() < 0.0001: # Very low chance per frame
         global_proctoring_alert_status = random.choice([
             "Tab Switched! (Concept)",
             "External App Detected! (Concept)",
@@ -164,26 +301,24 @@ def perform_ai_detection(frame, faces):
 # --- Generator for Video Streaming ---
 def generate_frames():
     """
-    Generates MJPEG frames from the webcam, performs face detection,
+    Generates MJPEG frames from the webcam, performs AI detection,
     and updates global analytics variables.
     """
-    global camera, global_face_count
+    global camera
 
-    # Flag to print frame dimensions only once
     first_frame_read = False
 
     while True:
         success, frame = camera.read()
         if not success:
             print("Error: Failed to read frame from camera. Attempting to re-open.")
-            # Attempt to re-open camera if it failed to read
             camera.release() # Release existing camera object
             camera = cv2.VideoCapture(VIDEO_SOURCE)
             if not camera.isOpened():
-                print(f"Critial Error: Could not re-open video source {VIDEO_SOURCE}. Exiting frame generation.")
-                break # Exit loop if camera cannot be re-opened
-            time.sleep(0.1) # Wait a bit before trying again
-            continue # Try reading frame again
+                print(f"Critical Error: Could not re-open video source {VIDEO_SOURCE}. Exiting frame generation.")
+                break
+            time.sleep(0.1)
+            continue
 
         if not first_frame_read:
             if frame is not None:
@@ -191,11 +326,10 @@ def generate_frames():
                 first_frame_read = True
             else:
                 print("Warning: First frame was None despite success=True. Retrying...")
-                continue # Skip processing this frame and try again
+                continue
 
         # Perform AI detection and update global variables
-        # No need to pass frame and faces explicitly as globals are used
-        perform_ai_detection(frame, face_cascade.detectMultiScale(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)))
+        perform_ai_detection(frame)
 
         # Encode the frame as JPEG
         ret, buffer = cv2.imencode('.jpg', frame)
@@ -228,8 +362,6 @@ def analytics():
     """
     Endpoint to provide real-time analytics data.
     """
-    # In a real application, you might fetch these from a more robust
-    # analytics processing pipeline or a database.
     return jsonify({
         'face_count': global_face_count,
         'sleeping_status': global_sleeping_status,
@@ -246,5 +378,5 @@ if __name__ == '__main__':
     atexit.register(lambda: camera.release())
 
     print(f"Flask app starting. Access at http://127.0.0.1:5000/")
-    print("Make sure 'haarcascade_frontalface_default.xml' is in the same directory.")
+    print("Make sure 'haarcascade_frontalface_default.xml' and 'shape_predictor_68_face_landmarks.dat' are in the same directory.")
     app.run(host='0.0.0.0', port=5000, debug=True)
