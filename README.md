@@ -76,6 +76,8 @@ Ensure your virtual environment is active.
 
 Run the Flask application:
 
+pip install -r backend/requirements.txt
+
 Bash
 
 python app.py
