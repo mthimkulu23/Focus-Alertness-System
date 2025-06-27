@@ -96,20 +96,6 @@ Once logged in, you will be redirected to the main index.html page, which should
 
 The system will start analyzing your facial features in real-time. Alerts for drowsiness, distraction, or yawning will be displayed [describe how alerts are shown, e.g., on-screen, audible, etc.].
 
-# 🤝 Contributing
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are greatly appreciated.
-
-Fork the Project
-
-Create your Feature Branch (git checkout -b feature/AmazingFeature)
-
-Commit your Changes (git commit -m 'Add some AmazingFeature')
-
-Push to the Branch (git push origin feature/AmazingFeature)
-
-Open a Pull Request
-
-
 
 # 📞 Contact
 Thabang Mthimkulu - [thabang23mthimkulu@gmail.com]
