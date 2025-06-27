@@ -1,8 +1,8 @@
 import cv2
 import time
 from flask import Flask, Response, jsonify, render_template
-import numpy as np # Import numpy for image processing
-import random # For simulating random events
+import numpy as np 
+import random 
 
 # Import dlib for face detection and landmark prediction
 import dlib
@@ -10,22 +10,21 @@ from scipy.spatial import distance as dist # For calculating Euclidean distance 
 
 app = Flask(__name__)
 
-# --- Configuration ---
-# Use 0 for default webcam, or a video file path
+
 VIDEO_SOURCE = 0
 # Interval for updating analytics (in seconds)
 ANALYTICS_UPDATE_INTERVAL = 1 # Faster UI updates
 
 # --- AI Detection Thresholds (Using real landmark data) ---
-EYE_AR_THRESH = 0.25 # Threshold for eye aspect ratio (drowsiness)
-EYE_AR_CONSEC_FRAMES = 10 # Number of consecutive frames eye must be below threshold
-MOUTH_AR_THRESH = 0.7 # Threshold for mouth aspect ratio (yawning)
-MOUTH_AR_CONSEC_FRAMES = 10 # Number of consecutive frames mouth must be above threshold
+EYE_AR_THRESH = 0.25 
+EYE_AR_CONSEC_FRAMES = 10 
+MOUTH_AR_THRESH = 0.7 
+MOUTH_AR_CONSEC_FRAMES = 10 
 # Head pose thresholds (in arbitrary units/degrees for simplified estimation)
-HEAD_POSE_YAW_THRESH = 15 # Horizontal head rotation deviation threshold
-HEAD_POSE_PITCH_THRESH = 15 # Vertical head rotation deviation threshold
-GAZE_AWAY_CONSEC_FRAMES = 30 # Number of consecutive frames gaze/head pose is away
-ABSENCE_TIME_THRESHOLD = 5 # Seconds of no face to trigger absent status
+HEAD_POSE_YAW_THRESH = 15 
+HEAD_POSE_PITCH_THRESH = 15 
+GAZE_AWAY_CONSEC_FRAMES = 30 
+ABSENCE_TIME_THRESHOLD = 5 
 
 # --- Global Variables for Analytics ---
 global_face_count = 0
@@ -36,9 +35,8 @@ global_copy_attempt_status = "None Detected"
 global_proctoring_alert_status = "No Violations"
 
 # --- AI Detection State Variables ---
-# For Drowsiness/Yawn Detection
-COUNTER = 0 # Frame counter for eye aspect ratio below threshold
-YAWN_COUNTER = 0 # Frame counter for mouth aspect ratio above threshold
+COUNTER = 0 
+YAWN_COUNTER = 0 
 # For Gaze/Head Pose Detection
 HEAD_POSE_AWAY_COUNTER = 0 # Frame counter for head pose deviation
 
@@ -70,10 +68,10 @@ def eye_aspect_ratio(eye):
 
 def mouth_aspect_ratio(mouth):
     # Compute the Euclidean distances between the two sets of vertical mouth landmarks (51, 59) and (53, 57)
-    A = dist.euclidean(mouth[2], mouth[10]) # Points 51 and 59
-    B = dist.euclidean(mouth[4], mouth[8])  # Points 53 and 57
+    A = dist.euclidean(mouth[2], mouth[10])
+    B = dist.euclidean(mouth[4], mouth[8])  
     # Compute the Euclidean distance between the horizontal mouth landmarks (48, 54)
-    C = dist.euclidean(mouth[0], mouth[6]) # Points 48 and 54
+    C = dist.euclidean(mouth[0], mouth[6]) 
     # Compute the mouth aspect ratio
     mar = (A + B) / (2.0 * C)
     return mar
@@ -122,8 +120,6 @@ def perform_ai_detection(frame):
             global_proctoring_alert_status = "Potential Cheating!"
 
         # Process each detected face (or just the first for simplicity if multiple)
-        # In a multi-person scenario, you might want to process each person
-        # separately or identify the "primary" user. For simplicity, we process the first.
         for i, rect in enumerate(rects):
             if predictor is None: # Skip landmark detection if predictor failed to load
                 break
@@ -169,34 +165,27 @@ def perform_ai_detection(frame):
                     global_proctoring_alert_status = "Yawn Detected - Low Alertness"
             else:
                 YAWN_COUNTER = 0 # Reset counter when mouth is closed
-                # Reset sleeping status if it was only due to yawning and eyes are open
                 if global_sleeping_status == "Yawning (AI Detected)" and ear >= EYE_AR_THRESH:
                      global_sleeping_status = "Awake"
             
             # --- Head Pose Estimation (for Gaze/Looking Away) ---
-            # Using specific landmarks (nose, chin, eye corners) to infer rough 3D pose for gaze
-            # This is a simplified approach without a full 3D model, but better than pure random
-            # Points for 3D model (approximate)
-            # Source: https://www.pyimagesearch.com/2017/05/08/drowsiness-detection-opencv-python-dlib/
-            # and common dlib landmark assignments
             image_points = np.array([
-                landmarks[30], # Nose tip
-                landmarks[8],  # Chin
-                landmarks[36], # Left eye left corner
-                landmarks[45], # Right eye right corner
-                landmarks[48], # Left mouth corner
-                landmarks[54]  # Right mouth corner
+                landmarks[30], 
+                landmarks[8],  
+                landmarks[36], 
+                landmarks[45], 
+                landmarks[48],
+                landmarks[54]  
             ], dtype="double")
 
             # Dummy 3D model points (arbitrary values for a generic face)
-            # In a real application, you'd calibrate these or use a known generic face model.
             model_points = np.array([
-                (0.0, 0.0, 0.0),             # Nose tip
-                (0.0, -330.0, -65.0),        # Chin
-                (-225.0, 170.0, -135.0),     # Left eye left corner
-                (225.0, 170.0, -135.0),      # Right eye right corner
-                (-150.0, -150.0, -125.0),    # Left mouth corner
-                (150.0, -150.0, -125.0)      # Right mouth corner
+                (0.0, 0.0, 0.0),            
+                (0.0, -330.0, -65.0),      
+                (-225.0, 170.0, -135.0),    
+                (225.0, 170.0, -135.0),      
+                (-150.0, -150.0, -125.0),   
+                (150.0, -150.0, -125.0)      
             ])
 
             # Camera internals (Approximations for a generic webcam)
@@ -238,7 +227,6 @@ def perform_ai_detection(frame):
                 if not (global_copy_attempt_status != "None Detected" or "System Access" in global_unauthorized_activity_status):
                     global_unauthorized_activity_status = "None Detected"
 
-            # --- Update Focus Score (based on combined real factors) ---
             # Focus is high if eyes are open, no yawning, and looking forward
             # Normalize EAR/MAR to be between 0 and 1, then scale to 50
             normalized_ear = min(1.0, ear / EYE_AR_THRESH) if EYE_AR_THRESH > 0 else 1.0
@@ -287,8 +275,6 @@ def perform_ai_detection(frame):
 
 
     # --- Simulate Tab Switching / External Access (conceptual, still random) ---
-    # This feature still requires OS-level integration for true detection.
-    # It remains a random simulation for demonstration purposes in this web app.
     if random.random() < 0.0001: # Very low chance per frame
         global_proctoring_alert_status = random.choice([
             "Tab Switched! (Concept)",
