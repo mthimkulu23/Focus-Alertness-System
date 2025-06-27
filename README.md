@@ -112,6 +112,6 @@ Open a Pull Request
 
 
 # 📞 Contact
-Your Thabang Mthimkulu - [thabang23mthimkulu@gmail.com]
+Thabang Mthimkulu - [thabang23mthimkulu@gmail.com]
 
 Project Link: https://github.com/mthimkulu23/Focus-Alertness-System
