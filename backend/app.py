@@ -355,7 +355,7 @@ def generate_frames():
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-# --- Flask Routes ---
+
 @app.route('/')
 def index():
     """Render the main HTML page."""
@@ -381,12 +381,12 @@ def analytics():
         'unauthorized_activity': global_unauthorized_activity_status,
         'copy_attempt': global_copy_attempt_status,
         'proctoring_alert': global_proctoring_alert_status,
-        'alert_type': global_current_alert_type # New: Include alert type for frontend
+        'alert_type': global_current_alert_type 
     })
 
-# --- Main execution block ---
+
 if __name__ == '__main__':
-    # Ensure the camera is released when the app stops
+
     import atexit
     atexit.register(lambda: camera.release())
 
