@@ -1,8 +1,8 @@
 import cv2
 import time
 from flask import Flask, Response, jsonify, render_template
-import numpy as np 
-import random 
+import numpy as np
+import random
 
 # Import dlib for face detection and landmark prediction
 import dlib
@@ -10,21 +10,22 @@ from scipy.spatial import distance as dist # For calculating Euclidean distance 
 
 app = Flask(__name__)
 
-
+# --- Configuration ---
+# Use 0 for default webcam, or a video file path
 VIDEO_SOURCE = 0
 # Interval for updating analytics (in seconds)
 ANALYTICS_UPDATE_INTERVAL = 1 # Faster UI updates
 
 # --- AI Detection Thresholds (Using real landmark data) ---
-EYE_AR_THRESH = 0.25 
-EYE_AR_CONSEC_FRAMES = 10 
-MOUTH_AR_THRESH = 0.7 
-MOUTH_AR_CONSEC_FRAMES = 10 
+EYE_AR_THRESH = 0.25 # Threshold for eye aspect ratio (drowsiness)
+EYE_AR_CONSEC_FRAMES = 10 # Number of consecutive frames eye must be below threshold
+MOUTH_AR_THRESH = 0.7 # Threshold for mouth aspect ratio (yawning)
+MOUTH_AR_CONSEC_FRAMES = 10 # Number of consecutive frames mouth must be above threshold
 # Head pose thresholds (in arbitrary units/degrees for simplified estimation)
-HEAD_POSE_YAW_THRESH = 15 
-HEAD_POSE_PITCH_THRESH = 15 
-GAZE_AWAY_CONSEC_FRAMES = 30 
-ABSENCE_TIME_THRESHOLD = 5 
+HEAD_POSE_YAW_THRESH = 15 # Horizontal head rotation deviation threshold
+HEAD_POSE_PITCH_THRESH = 15 # Vertical head rotation deviation threshold
+GAZE_AWAY_CONSEC_FRAMES = 30 # Number of consecutive frames gaze/head pose is away
+ABSENCE_TIME_THRESHOLD = 5 # Seconds of no face to trigger absent status
 
 # --- Global Variables for Analytics ---
 global_face_count = 0
@@ -33,10 +34,12 @@ global_focus_score = 0.0
 global_unauthorized_activity_status = "None Detected"
 global_copy_attempt_status = "None Detected"
 global_proctoring_alert_status = "No Violations"
+global_current_alert_type = None # New: Holds the type of alert for frontend
 
 # --- AI Detection State Variables ---
-COUNTER = 0 
-YAWN_COUNTER = 0 
+# For Drowsiness/Yawn Detection
+COUNTER = 0 # Frame counter for eye aspect ratio below threshold
+YAWN_COUNTER = 0 # Frame counter for mouth aspect ratio above threshold
 # For Gaze/Head Pose Detection
 HEAD_POSE_AWAY_COUNTER = 0 # Frame counter for head pose deviation
 
@@ -68,10 +71,10 @@ def eye_aspect_ratio(eye):
 
 def mouth_aspect_ratio(mouth):
     # Compute the Euclidean distances between the two sets of vertical mouth landmarks (51, 59) and (53, 57)
-    A = dist.euclidean(mouth[2], mouth[10])
-    B = dist.euclidean(mouth[4], mouth[8])  
+    A = dist.euclidean(mouth[2], mouth[10]) # Points 51 and 59
+    B = dist.euclidean(mouth[4], mouth[8])  # Points 53 and 57
     # Compute the Euclidean distance between the horizontal mouth landmarks (48, 54)
-    C = dist.euclidean(mouth[0], mouth[6]) 
+    C = dist.euclidean(mouth[0], mouth[6]) # Points 48 and 54
     # Compute the mouth aspect ratio
     mar = (A + B) / (2.0 * C)
     return mar
@@ -90,6 +93,7 @@ def perform_ai_detection(frame):
     """
     Performs AI-based detection for sleeping, focus, unauthorized activity,
     and copy attempts using dlib facial landmarks.
+    Returns a string indicating the type of alert, or None.
     """
     global global_face_count, global_sleeping_status, global_focus_score, \
            global_unauthorized_activity_status, global_copy_attempt_status, \
@@ -98,12 +102,18 @@ def perform_ai_detection(frame):
 
     current_time = time.time()
     gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    
+    current_frame_alert_type = None # Local variable to hold alert for this frame
 
     # Detect faces in the grayscale frame using dlib's HOG detector
     rects = detector(gray_frame, 0) # 0 means no upsampling
 
     global_face_count = len(rects)
 
+    # Variables to store data for the primary face for detailed analysis and drawing
+    primary_rect = None
+    primary_landmarks = None
+    
     if global_face_count > 0:
         last_person_detected_time = current_time
         # Reset non-persistent statuses unless re-triggered in this frame
@@ -118,24 +128,26 @@ def perform_ai_detection(frame):
         if global_face_count > 1:
             global_copy_attempt_status = f"Multiple Persons Detected ({global_face_count})!"
             global_proctoring_alert_status = "Potential Cheating!"
+            current_frame_alert_type = "copy_attempt" # Set alert type
 
-        # Process each detected face (or just the first for simplicity if multiple)
-        for i, rect in enumerate(rects):
-            if predictor is None: # Skip landmark detection if predictor failed to load
-                break
-
-            # Determine the facial landmarks for the face region
-            shape = predictor(gray_frame, rect)
-            landmarks = np.array([(p.x, p.y) for p in shape.parts()])
+        # --- Detailed AI Analysis for the Primary Face ---
+        # We focus on the first detected face for detailed EAR/MAR/HeadPose analysis.
+        # This part runs only if there's at least one face and predictor is loaded,
+        # and if a copy_attempt alert is not already prioritized (optional logic).
+        if predictor is not None and len(rects) > 0:
+            # We always process the first face for detailed analytics
+            primary_rect = rects[0]
+            shape = predictor(gray_frame, primary_rect)
+            primary_landmarks = np.array([(p.x, p.y) for p in shape.parts()])
 
             # Extract eye and mouth landmarks (indices from dlib's 68-point model)
             left_eye_indices = [42, 43, 44, 45, 46, 47]
             right_eye_indices = [36, 37, 38, 39, 40, 41]
             mouth_indices = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67]
 
-            left_eye = landmarks[left_eye_indices]
-            right_eye = landmarks[right_eye_indices]
-            mouth = landmarks[mouth_indices]
+            left_eye = primary_landmarks[left_eye_indices]
+            right_eye = primary_landmarks[right_eye_indices]
+            mouth = primary_landmarks[mouth_indices]
 
             # Calculate EAR for both eyes and average
             leftEAR = eye_aspect_ratio(left_eye)
@@ -151,6 +163,8 @@ def perform_ai_detection(frame):
                 if COUNTER >= EYE_AR_CONSEC_FRAMES:
                     global_sleeping_status = "Likely Sleeping (Eyes Closed)"
                     global_proctoring_alert_status = "Drowsiness Detected!"
+                    if current_frame_alert_type is None: # Only set if no other higher priority alert
+                        current_frame_alert_type = "drowsiness" # Set alert type
             else:
                 COUNTER = 0 # Reset counter when eyes are open
                 # Only set to awake if not already sleeping due to prolonged closure or yawn
@@ -163,33 +177,36 @@ def perform_ai_detection(frame):
                 if YAWN_COUNTER >= MOUTH_AR_CONSEC_FRAMES:
                     global_sleeping_status = "Yawning (AI Detected)"
                     global_proctoring_alert_status = "Yawn Detected - Low Alertness"
+                    if current_frame_alert_type is None: # Only set if no other higher priority alert
+                        current_frame_alert_type = "yawn" # Set alert type
             else:
                 YAWN_COUNTER = 0 # Reset counter when mouth is closed
+                # Reset sleeping status if it was only due to yawning and eyes are open
                 if global_sleeping_status == "Yawning (AI Detected)" and ear >= EYE_AR_THRESH:
                      global_sleeping_status = "Awake"
             
             # --- Head Pose Estimation (for Gaze/Looking Away) ---
             image_points = np.array([
-                landmarks[30], 
-                landmarks[8],  
-                landmarks[36], 
-                landmarks[45], 
-                landmarks[48],
-                landmarks[54]  
+                primary_landmarks[30], 
+                primary_landmarks[8],  
+                primary_landmarks[36],
+                primary_landmarks[45], 
+                primary_landmarks[48], 
+                primary_landmarks[54]  
             ], dtype="double")
 
             # Dummy 3D model points (arbitrary values for a generic face)
             model_points = np.array([
-                (0.0, 0.0, 0.0),            
-                (0.0, -330.0, -65.0),      
-                (-225.0, 170.0, -135.0),    
+                (0.0, 0.0, 0.0),             
+                (0.0, -330.0, -65.0),     
+                (-225.0, 170.0, -135.0),     
                 (225.0, 170.0, -135.0),      
-                (-150.0, -150.0, -125.0),   
-                (150.0, -150.0, -125.0)      
+                (-150.0, -150.0, -125.0),    
+                (150.0, -150.0, -125.0)     
             ])
 
             # Camera internals (Approximations for a generic webcam)
-            focal_length = frame.shape[1] # Approximate focal length (image width)
+            focal_length = frame.shape[1] 
             center = (frame.shape[1]/2, frame.shape[0]/2)
             camera_matrix = np.array([
                                 [focal_length, 0, center[0]],
@@ -221,14 +238,15 @@ def perform_ai_detection(frame):
                 if HEAD_POSE_AWAY_COUNTER >= GAZE_AWAY_CONSEC_FRAMES:
                     global_unauthorized_activity_status = f"Looking Away (Yaw: {round(yaw,1)}deg, Pitch: {round(pitch,1)}deg)"
                     global_proctoring_alert_status = "Attention Diverted!"
+                    if current_frame_alert_type is None: 
+                        current_frame_alert_type = "gaze_violation" 
             else:
                 HEAD_POSE_AWAY_COUNTER = 0
-                # Only clear if no other unauthorized activity (like multi-person or system violation)
+                # Only clear if no other unauthorized activity is set (like multi-person or system violation)
                 if not (global_copy_attempt_status != "None Detected" or "System Access" in global_unauthorized_activity_status):
                     global_unauthorized_activity_status = "None Detected"
 
-            # Focus is high if eyes are open, no yawning, and looking forward
-            # Normalize EAR/MAR to be between 0 and 1, then scale to 50
+            # --- Update Focus Score (based on combined real factors) ---
             normalized_ear = min(1.0, ear / EYE_AR_THRESH) if EYE_AR_THRESH > 0 else 1.0
             focus_from_eyes = normalized_ear * 50
             
@@ -242,29 +260,32 @@ def perform_ai_detection(frame):
             global_focus_score = (focus_from_eyes + focus_from_mouth) - gaze_penalty
             global_focus_score = min(100.0, max(0.0, global_focus_score)) # Cap between 0 and 100
 
-
-            # --- Draw Rectangles and Landmarks ---
-            x, y, w, h = rect.left(), rect.top(), rect.width(), rect.height()
+        # --- Draw Rectangles and Landmarks for ALL Detected Faces ---
+        for i, rect_draw in enumerate(rects):
+            x, y, w, h = rect_draw.left(), rect_draw.top(), rect_draw.width(), rect_draw.height()
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
             cv2.putText(frame, f"Person {i+1}", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
 
-            # Draw landmarks for the first face (to avoid clutter if multiple faces)
-            for (lx, ly) in landmarks:
-                cv2.circle(frame, (lx, ly), 1, (0, 255, 0), -1)
+           
+            if i == 0 and primary_landmarks is not None:
+                for (lx, ly) in primary_landmarks:
+                    cv2.circle(frame, (lx, ly), 1, (0, 255, 0), -1)
 
-    else: # No person detected
+    else: 
         time_since_last_person = current_time - last_person_detected_time
         if time_since_last_person > ABSENCE_TIME_THRESHOLD:
             global_sleeping_status = "No person detected - (Absent)"
             global_proctoring_alert_status = "Student Absent!"
             global_unauthorized_activity_status = "No Person Detected"
+            if current_frame_alert_type is None:
+                current_frame_alert_type = "absent_violation" 
         else:
-            global_sleeping_status = "No person detected" # Just temporarily absent
-            global_unauthorized_activity_status = "None Detected" # Clear if person might just be briefly out of frame
+            global_sleeping_status = "No person detected" 
+            global_unauthorized_activity_status = "None Detected"
 
         global_focus_score = 0.0
         global_copy_attempt_status = "None Detected"
-        # Only clear if it was set for absence, not from a system violation from previous frames
+    
         if global_proctoring_alert_status != "Student Absent!":
             global_proctoring_alert_status = "No Violations"
 
@@ -282,6 +303,11 @@ def perform_ai_detection(frame):
             "System Violation! (Concept)"
         ])
         global_unauthorized_activity_status = "System Access Violation (Concept)"
+        if current_frame_alert_type is None: 
+            current_frame_alert_type = "system_violation" 
+            
+
+    return current_frame_alert_type # Return the alert type for the frontend
 
 
 # --- Generator for Video Streaming ---
@@ -290,7 +316,7 @@ def generate_frames():
     Generates MJPEG frames from the webcam, performs AI detection,
     and updates global analytics variables.
     """
-    global camera
+    global camera, global_current_alert_type 
 
     first_frame_read = False
 
@@ -298,7 +324,7 @@ def generate_frames():
         success, frame = camera.read()
         if not success:
             print("Error: Failed to read frame from camera. Attempting to re-open.")
-            camera.release() # Release existing camera object
+            camera.release() 
             camera = cv2.VideoCapture(VIDEO_SOURCE)
             if not camera.isOpened():
                 print(f"Critical Error: Could not re-open video source {VIDEO_SOURCE}. Exiting frame generation.")
@@ -314,8 +340,8 @@ def generate_frames():
                 print("Warning: First frame was None despite success=True. Retrying...")
                 continue
 
-        # Perform AI detection and update global variables
-        perform_ai_detection(frame)
+        # Perform AI detection and update global variables, capturing the alert type
+        global_current_alert_type = perform_ai_detection(frame)
 
         # Encode the frame as JPEG
         ret, buffer = cv2.imencode('.jpg', frame)
@@ -354,7 +380,8 @@ def analytics():
         'focus_score': round(global_focus_score, 2),
         'unauthorized_activity': global_unauthorized_activity_status,
         'copy_attempt': global_copy_attempt_status,
-        'proctoring_alert': global_proctoring_alert_status
+        'proctoring_alert': global_proctoring_alert_status,
+        'alert_type': global_current_alert_type # New: Include alert type for frontend
     })
 
 # --- Main execution block ---

@@ -56,12 +56,15 @@
                 </div>
 
                 <div class="mt-6 p-4 bg-yellow-50 text-yellow-800 rounded-lg border border-yellow-200 text-sm italic">
-                    <p>Note: "Sleeping Status" and "Focus Score" are placeholders in this prototype. Full functionality requires advanced computer vision and machine learning models.</p>
-                    <p class="mt-2 font-semibold">Important: Detection of "Unauthorized Activity," "Copy Attempts," and "Proctoring Alerts" are conceptual placeholders in this web-based prototype. Implementing these features would require a more robust system, potentially involving operating system-level monitoring agents and advanced AI/ML for content analysis, which are outside the scope of a basic browser-based application.</p>
+                    <p>Note: "Sleeping Status", "Focus Score", "Unauthorized Activity" (Gaze/Absence), and "Copy Attempts" (Multiple Persons) are computed by AI based on eye closure, yawning, facial landmarks, and face count.</p>
+                    <p class="mt-2 font-semibold">Important: "Tab Switched/External App Detected" alerts are conceptual placeholders in this web-based prototype, as implementing these specific features would require operating system-level monitoring agents and advanced AI/ML for content analysis, which are outside the scope of a basic browser-based application.</p>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Hidden audio element for alerts -->
+    <audio id="alertSound" src="data:audio/wav;base64,UklGRlFFBQBXQVZFZm10IBAAAAABAAEARKwAAESsAAABAAgAZGF0YUBAQQAAAAAAGhhaGgAAAAAAAUAAAAAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" preload="auto"></audio>
 
     <!-- Corrected path for script.js using Flask's url_for -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>
