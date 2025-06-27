@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom/Work Monitor</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <!-- Corrected path for style.css using Flask's url_for -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="font-inter bg-gray-100 flex items-center justify-center min-h-screen p-4">
+    <div class="container bg-white shadow-lg rounded-xl p-6 md:p-8 w-full max-w-4xl border border-gray-200">
+        <h1 class="text-3xl md:text-4xl font-bold text-center text-gray-800 mb-6">Classroom/Work Monitor</h1>
+
+        <div class="flex flex-col md:flex-row gap-6">
+            <!-- Live Video Feed -->
+            <div class="flex-1 bg-gray-900 rounded-lg overflow-hidden border-2 border-gray-700">
+                <h2 class="text-xl font-semibold text-white p-4 bg-gray-800 text-center">Live Feed</h2>
+                <img id="videoFeed" src="" alt="Live Video Feed" class="w-full h-auto block rounded-b-lg">
+            </div>
+
+            <!-- Analytics Dashboard -->
+            <div class="flex-1 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg p-5 border border-blue-200 shadow-md">
+                <h2 class="text-xl font-semibold text-gray-800 mb-4 text-center">Real-time Analytics</h2>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="analytic-card bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between">
+                        <span class="text-gray-600 font-medium">Persons Detected:</span>
+                        <span id="faceCount" class="text-indigo-600 text-2xl font-bold">0</span>
+                    </div>
+                    <div class="analytic-card bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between">
+                        <span class="text-gray-600 font-medium">Sleeping Status:</span>
+                        <span id="sleepingStatus" class="text-green-600 text-lg font-bold">No person detected</span>
+                    </div>
+                    <div class="analytic-card bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between">
+                        <span class="text-gray-600 font-medium">Estimated Focus Score:</span>
+                        <span id="focusScore" class="text-blue-600 text-2xl font-bold">0.00</span>
+                    </div>
+                    <!-- New: Unauthorized Activity Detection -->
+                    <div class="analytic-card bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between col-span-1 sm:col-span-2">
+                        <span class="text-gray-600 font-medium">Unauthorized Activity:</span>
+                        <span id="unauthorizedActivity" class="text-gray-500 text-lg font-bold">None Detected</span>
+                    </div>
+                    <!-- New: Copy Attempt Detection -->
+                    <div class="analytic-card bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between col-span-1 sm:col-span-2">
+                        <span class="text-gray-600 font-medium">Copy Attempt Alert:</span>
+                        <span id="copyAttempt" class="text-gray-500 text-lg font-bold">None Detected</span>
+                    </div>
+                    <!-- New: Proctoring Alert -->
+                    <div class="analytic-card bg-white p-4 rounded-lg shadow-sm border border-gray-100 flex items-center justify-between col-span-1 sm:col-span-2">
+                        <span class="text-gray-600 font-medium">Proctoring Alert:</span>
+                        <span id="proctoringAlert" class="text-gray-500 text-lg font-bold">No Violations</span>
+                    </div>
+                </div>
+
+                <div class="mt-6 p-4 bg-yellow-50 text-yellow-800 rounded-lg border border-yellow-200 text-sm italic">
+                    <p>Note: "Sleeping Status" and "Focus Score" are placeholders in this prototype. Full functionality requires advanced computer vision and machine learning models.</p>
+                    <p class="mt-2 font-semibold">Important: Detection of "Unauthorized Activity," "Copy Attempts," and "Proctoring Alerts" are conceptual placeholders in this web-based prototype. Implementing these features would require a more robust system, potentially involving operating system-level monitoring agents and advanced AI/ML for content analysis, which are outside the scope of a basic browser-based application.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Corrected path for script.js using Flask's url_for -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+/* Custom CSS to complement Tailwind */
+
+/* Apply Inter font */
+body {
+    font-family: 'Inter', sans-serif;
+    line-height: 1.6;
+    color: #333; /* Darker text for better readability */
+    padding: 1rem; /* Ensure content doesn't touch edges on small screens */
+    border-radius: 0.5rem; /* Subtle rounded corners for the body if background is different */
+}
+
+/* Basic centering for the main container */
+.container {
+    max-width: 90%; /* Adjust as needed */
+    margin: auto;
+    border-radius: 1rem; /* More pronounced rounded corners for the main container */
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); /* Stronger shadow */
+}
+
+/* Ensure video feed image covers its container */
+#videoFeed {
+    background-color: #000; /* Add a black background for when the feed is loading/unavailable */
+    object-fit: cover;
+    height: 360px; /* Fixed height for the video container, adjust as needed */
+    width: 100%; /* Ensure it takes full width of its container */
+    border-radius: 0.5rem; /* Rounded corners for the video feed */
+}
+
+/* Analytic card hover effect and subtle border for definition */
+.analytic-card {
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out, border-color 0.2s ease-in-out;
+    border: 1px solid #e2e8f0; /* Subtle default border */
+    border-radius: 0.5rem; /* Rounded corners for analytic cards */
+    padding: 1rem; /* Consistent padding */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.analytic-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border-color: #93c5fd; /* Light blue border on hover */
+}
+
+/* Headings styling */
+h1 {
+    font-size: 2.5rem; /* Larger heading for h1 */
+    margin-bottom: 1.5rem;
+    color: #2d3748; /* Darker heading color */
+}
+
+h2 {
+    font-size: 1.75rem; /* Larger heading for h2 */
+    margin-bottom: 1rem;
+    color: #2d3748;
+}
+
+/* Responsive font sizes for headings */
+@media (max-width: 768px) {
+    h1 {
+        font-size: 2rem;
+    }
+    h2 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Styling for alert/note boxes */
+.bg-yellow-50 {
+    background-color: #fffbeb;
+    border-color: #fbd38d;
+    color: #975a16;
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+/* Specific styling for alert text for visibility */
+.text-red-600 {
+    font-weight: 700; /* Bolder for alerts */
+    color: #dc2626; /* Strong red */
+}
+.text-green-600 {
+    font-weight: 700;
+    color: #16a34a; /* Strong green */
+}
+.text-gray-500 {
+    font-weight: 500;
+    color: #6b7280; /* Muted gray */
+}
+.text-blue-600 {
+    font-weight: 700;
+    color: #2563eb; /* Strong blue */
+}
+.text-indigo-600 {
+    font-weight: 700;
+    color: #4f46e5; /* Strong indigo */
+}
